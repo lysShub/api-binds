@@ -95,24 +95,30 @@ func (f *file) build(name, logger string) error {
 
 	for _, m := range f.methods {
 		f.Str(prefix).Str(m.name).Str("(ctx *gin.Context){").NL()
-		f.Str("var req ").Str(m.req).NL()
-		f.Str("var resp ").Str(m.resp).NL()
-		f.NL()
+		{
+			f.Str("var req ").Str(m.req).NL()
+			f.Str("var resp ").Str(m.resp).NL()
+			f.NL()
 
-		switch m.httpmethod {
-		case "GET":
-			f.Str("var err = ctx.BindQuery(&req)").NL()
-		case "POST":
-			f.Str("var err = ctx.Bind(&req)").NL()
-		default:
-			return errors.Errorf("not support http method %s", m.httpmethod)
+			switch m.httpmethod {
+			case "GET":
+				f.Str("var err = ctx.BindQuery(&req)").NL()
+			case "POST":
+				f.Str("var err = ctx.Bind(&req)").NL()
+			default:
+				return errors.Errorf("not support http method %s", m.httpmethod)
+			}
+			f.buildHandleErr(logger)
+			f.NL()
+
+			f.Str("code,err := ").Str(key).Str(m.originName).Str("(req, &resp)").NL()
+			f.buildHandleErr(logger)
+			f.Unchar().Str(" else if code==0 { ").NL().
+				Str("code=http.StatusOK").NL()
+			f.Str("}").NL()
+
+			f.Str("ctx.JSON(code, resp)").NL()
 		}
-		f.buildHandleErr(logger)
-		f.NL()
-
-		f.Str("code,err := ").Str(key).Str(m.originName).Str("(req, &resp)").NL()
-		f.buildHandleErr(logger)
-		f.Str("ctx.JSON(code, resp)").NL()
 		f.Str("}").NL()
 		f.NL()
 	}
@@ -120,7 +126,7 @@ func (f *file) build(name, logger string) error {
 	return create(f.filename, f.Bytes())
 }
 
-func (f *file) buildHandleErr(logger string) {
+func (f *file) buildHandleErr(logger string) *file {
 	f.Str("if err != nil {").NL()
 	f.Str("ctx.Status(http.StatusBadRequest)").NL()
 
@@ -130,6 +136,7 @@ func (f *file) buildHandleErr(logger string) {
 
 	f.Str("return").NL()
 	f.Str("}").NL()
+	return f
 }
 
 func create(filename string, code []byte) error {
