@@ -4,7 +4,7 @@ http api绑定， 用于生成简单接口的序列化代码。
 
 ##### Start:
 
-1. 实现handler
+1. 实现handler:
 
    ```go
    //go:generate api-binds -name handler -kind Gin
@@ -35,13 +35,70 @@ http api绑定， 用于生成简单接口的序列化代码。
 
 3. 生成代码
 
-   运行 `go generate ./...` , 可以看到有生成代码：
+   运行 `go generate ./...` , 可以看到有生成代码handler_gen.go：
 
    ```go
-   ```
-
+   type Handler struct {
+   	*handler
+   }
    
-
+   func (h *Handler) Userinfo(ctx *gin.Context) {
+   	var req *types.UserinfoReq
+   	var resp types.UserinfoResp
+   
+   	var err = ctx.BindQuery(&req)
+   	if err != nil {
+   		ctx.Status(http.StatusBadRequest)
+   		return
+   	}
+   
+   	code, err := h.GetUserinfo(req, &resp)
+   	if err != nil {
+   		ctx.Status(http.StatusBadRequest)
+   		return
+   	}
+   	ctx.JSON(code, resp)
+   }
+   
+   func (h *Handler) Login(ctx *gin.Context) {
+   	var req *types.LoginReq
+   	var resp types.LoginResp
+   
+   	var err = ctx.Bind(&req)
+   	if err != nil {
+   		ctx.Status(http.StatusBadRequest)
+   		return
+   	}
+   
+   	code, err := h.PostLogin(req, &resp)
+   	if err != nil {
+   		ctx.Status(http.StatusBadRequest)
+   		return
+   	}
+   	ctx.JSON(code, resp)
+   }
+   
+   func (h *Handler) Regist(ctx *gin.Context) {
+   	var req *types.RegistReq
+   	var resp types.RegistResp
+   
+   	var err = ctx.Bind(&req)
+   	if err != nil {
+   		ctx.Status(http.StatusBadRequest)
+   		return
+   	}
+   
+   	code, err := h.PostRegist(req, &resp)
+   	if err != nil {
+   		ctx.Status(http.StatusBadRequest)
+   		return
+   	}
+   	ctx.JSON(code, resp)
+   }
+   ```
+   
+   
+   
    
 
 ##### TODO:

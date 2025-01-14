@@ -4,10 +4,14 @@ import (
 	"embed"
 	"flag"
 	"fmt"
+	"go/parser"
+	"go/token"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path"
+	"path/filepath"
 	"runtime/debug"
 	"strconv"
 	"strings"
@@ -16,7 +20,7 @@ import (
 )
 
 //go:embed binds
-var binds embed.FS
+var code embed.FS
 
 func main() {
 	if err := Bind(); err != nil {
@@ -44,7 +48,23 @@ func Bind() error {
 		return errors.Errorf("invalid kind %s", *kind)
 	}
 
-	s, err := gen_test_func("handler", *name, *kind)
+	var pkgname string
+	if err := filepath.WalkDir(".", func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(d.Name(), ".go") || strings.HasSuffix(d.Name(), "_test.go") {
+			return err
+		}
+
+		f, err := parser.ParseFile(token.NewFileSet(), d.Name(), nil, parser.PackageClauseOnly)
+		if err != nil {
+			return errors.WithStack(err)
+		}
+		pkgname = f.Name.Name
+		return filepath.SkipAll
+	}); err != nil {
+		return err
+	}
+
+	s, err := gen_test_func(pkgname, *name, *kind)
 	if err != nil {
 		return err
 	}
@@ -75,14 +95,14 @@ func gen_test_func(pkgname, name, kind string) (s string, err error) {
 		return "", err
 	}
 
-	fs, err := binds.ReadDir("binds")
+	fs, err := code.ReadDir("binds")
 	if err != nil {
 		return "", errors.WithStack(err)
 	}
 
 	var l = []io.Reader{test_template(pkgname, name, kind, cmd, vcs)}
 	for _, e := range fs {
-		f, err := binds.Open(path.Join("binds", e.Name()))
+		f, err := code.Open(path.Join("binds", e.Name()))
 		if err != nil {
 			return "", errors.WithStack(err)
 		}
