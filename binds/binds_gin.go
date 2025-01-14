@@ -126,9 +126,6 @@ func fnname(origin string) (name, kind string, err error) {
 			return name, m, nil
 		}
 	}
-	if 'A' <= origin[0] || origin[0] <= 'Z' {
-		return "", "", errors.Errorf("function name %s is public, but without specified prefix", origin)
-	}
 	return "", "", nil
 }
 
