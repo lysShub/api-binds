@@ -19,10 +19,29 @@ type builder struct {
 	// 原始类型名, 不包含包名
 	name string
 
+	// 存储文件对象, key为文件名(没有后缀、没有_gen)
 	files map[string]*file
 }
 
 func (b *builder) Build() (err error) {
+	// 避免在
+	// (h *handler)PostUser(xx)(int,error)
+	// (h *handler)GetUser(xx)(int,error)
+	// 情况下生成重复方法
+	var names = map[string]int{}
+	for _, f := range b.files {
+		for _, e := range f.methods {
+			names[e.name] += 1
+		}
+	}
+	for _, f := range b.files {
+		for i, e := range f.methods {
+			if names[e.name] > 1 {
+				f.methods[i].name = fmt.Sprintf("%s%s", e.name, e.httpmethod)
+			}
+		}
+	}
+
 	for _, f := range b.files {
 		if err := f.build(b.name, b.logerr); err != nil {
 			return err
@@ -47,7 +66,9 @@ func (b *builder) file(name string) *file {
 type file struct {
 	filename string          // 文件名, 不带后缀
 	imports  map[string]bool // 生成文件import
-	methods  []method        // 类型拥有的方法
+
+	// 命中的方法
+	methods []method
 
 	// 如果长度不为0, 则此文件定义Handler, 同时导出handler的其他函数
 	others []reflect.Method
