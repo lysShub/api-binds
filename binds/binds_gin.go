@@ -2,9 +2,7 @@ package binds
 
 import (
 	"fmt"
-	"path"
 	"reflect"
-	"strconv"
 	"strings"
 
 	_ "net/http"
@@ -15,15 +13,14 @@ import (
 
 // Gin bind gin
 func Gin(t reflect.Type) error {
-	var b = &builder{
-		imports: []string{
-			`"github.com/gin-gonic/gin"`,
-			`"net/http"`,
-		},
-	}
 	if t.Kind() != reflect.Pointer {
 		t = reflect.PointerTo(t)
 	}
+	if t.NumMethod() == 0 {
+		return errors.Errorf("type %s has't method", t.Name())
+	}
+
+	var b = &builder{}
 	b.name = t.Elem().Name()
 	if b.name == "" {
 		return errors.New("not support anonymous type")
@@ -35,75 +32,73 @@ func Gin(t reflect.Type) error {
 	if err != nil {
 		return err
 	}
-	if declarefile, err := f.FindDeclare(b.name); err != nil {
+	declarefile, err := f.FindDeclare(b.name)
+	if err != nil {
 		return err
 	} else {
-		f := b.file(declarefile)
-		f.typedef = true
+		_ = b.file(declarefile)
 	}
 
-	n := t.NumMethod()
-	if n == 0 {
-		return errors.Errorf("type %s has't method", b.name)
-	}
-	for i := range n {
+	for i := range t.NumMethod() {
 		m := t.Method(i)
 
 		name, kind, err := fnname(m.Name)
 		if err != nil {
 			return err
-		} else if name == "" {
-			continue
 		}
 
-		file, err := f.FindMethod(b.name, m.Name)
-		if err != nil {
-			return err
-		}
-		f := b.file(file)
+		if name == "" {
+			// 其他导出函数
+			f := b.file(declarefile)
+			f.others = append(f.others, m)
+			if err := f.collectMethodImports(m); err != nil {
+				return err
+			}
+		} else {
+			// 命中函数
+			file, err := f.FindMethod(b.name, m.Name)
+			if err != nil {
+				return err
+			}
+			f := b.file(file)
+			if err := f.collectMethodImports(m); err != nil {
+				return err
+			}
 
-		var e = method{httpmethod: kind, originName: m.Name, name: name}
-
-		if m.Type.NumIn() == 3 {
-			for i, t := range []reflect.Type{m.Type.In(1), m.Type.In(2)} {
-				if err := checkParaType(t); err != nil {
-					return errors.WithMessage(err, m.Name)
-				}
-
-				pkgpath, pkgname, err := pkginfo(t)
-				if err != nil {
-					return err
-				}
-				imp := strconv.Quote(pkgpath)
-				if path.Base(pkgpath) != pkgname {
-					imp = fmt.Sprintf("%s %s", pkgname, imp) // 文件夹名与包名不同
-				}
-				f.imports[imp] = true
-
-				if i == 0 {
-					e.req = t.String()
-				} else {
-					if t.Kind() != reflect.Pointer || t.Elem().Kind() != reflect.Struct {
-						return errors.Errorf("method %s parameter resp isn't struct pointer", m.Name)
+			var e = method{httpmethod: kind, originName: m.Name, name: name}
+			if m.Type.NumIn() == 3 {
+				for i, t := range []reflect.Type{m.Type.In(1), m.Type.In(2)} {
+					if err := checkParaType(t); err != nil {
+						return errors.WithMessage(err, m.Name)
 					}
-					e.resp = t.Elem().String()
+
+					if i == 0 {
+						e.req = t.String()
+					} else {
+						if t.Kind() != reflect.Pointer || t.Elem().Kind() != reflect.Struct {
+							return errors.Errorf("method %s parameter resp isn't struct pointer", m.Name)
+						}
+						e.resp = t.Elem().String()
+					}
 				}
+			} else {
+				return errors.Errorf("method %s has invalid input parameter number", m.Name)
 			}
-		} else {
-			return errors.Errorf("method %s has invalid input parameter number", m.Name)
-		}
 
-		if m.Type.NumOut() == 2 {
-			if m.Type.Out(0).String() != "int" {
-				return errors.Errorf("method %s first output parameter isn't int", m.Name)
-			} else if !implemented[error](m.Type.Out(1)) {
-				return errors.Errorf("method %s second output parameter isn't error", m.Name)
+			if m.Type.NumOut() == 2 {
+				if m.Type.Out(0).String() != "int" {
+					return errors.Errorf("method %s first output parameter isn't int", m.Name)
+				} else if !implemented[error](m.Type.Out(1)) {
+					return errors.Errorf("method %s second output parameter isn't error", m.Name)
+				}
+			} else {
+				return errors.Errorf("method %s has invalid output parameter number", m.Name)
 			}
-		} else {
-			return errors.Errorf("method %s has invalid output parameter number", m.Name)
-		}
 
-		f.methods = append(f.methods, e)
+			f.imports[`"net/http"`] = true
+			f.imports[`"github.com/gin-gonic/gin"`] = true
+			f.methods = append(f.methods, e)
+		}
 	}
 
 	return b.Build()

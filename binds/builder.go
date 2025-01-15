@@ -4,13 +4,15 @@ import (
 	"fmt"
 	"go/format"
 	"os"
+	"path"
+	"reflect"
+	"strconv"
+	"strings"
 
 	"github.com/pkg/errors"
 )
 
 type builder struct {
-	// 公共import包
-	imports []string
 	// 错误日志、直接可以取用ctx(*gin.Context), err(error), 如
 	//  slog.LogAttrs(context.Background(), slog.LevelError, err.Error(), slog.String("uri", ctx.Request.RequestURI))
 	logerr string
@@ -22,16 +24,8 @@ type builder struct {
 
 func (b *builder) Build() (err error) {
 	for _, f := range b.files {
-		if len(f.imports) > 0 {
-			for _, e := range b.imports {
-				f.imports[e] = true
-			}
-		}
-	}
-
-	for _, f := range b.files {
 		if err := f.build(b.name, b.logerr); err != nil {
-			return nil
+			return err
 		}
 	}
 	return nil
@@ -54,7 +48,9 @@ type file struct {
 	filename string          // 文件名, 不带后缀
 	imports  map[string]bool // 生成文件import
 	methods  []method        // 类型拥有的方法
-	typedef  bool            // 是否在此文件定义Handler
+
+	// 如果长度不为0, 则此文件定义Handler, 同时导出handler的其他函数
+	others []reflect.Method
 
 	writer
 }
@@ -70,7 +66,7 @@ type method struct {
 func (f *file) build(name, logger string) error {
 	var (
 		genname = string(touper(name[0])) + name[1:]
-		key     = string(name[0]) + "."
+		key     = string(name[0]) + ".i."
 		prefix  = fmt.Sprintf("func (%s *%s)", string(name[0]), genname)
 	)
 
@@ -87,10 +83,44 @@ func (f *file) build(name, logger string) error {
 	}
 	f.Char(')').NL()
 
-	if f.typedef {
+	// handler的其他导出函数
+	if len(f.others) > 0 {
 		f.Str("type ").Str(genname).Str(" struct{").NL().
-			Str("*").Str(name).NL()
+			Str("i *").Str(name).NL()
 		f.Str("}").NL()
+
+		for _, m := range f.others {
+			var args []string
+			var t = m.Type
+
+			f.Str(prefix).Str(m.Name).Str("( ")
+			for i := range t.NumIn() {
+				if i > 0 {
+					arg := fmt.Sprintf("arg%d", i)
+					args = append(args, arg)
+					f.Str(arg).SP().Str(t.In(i).String()).Str(",")
+				}
+			}
+			f.Unchar().Str(") ")
+			switch t.NumOut() {
+			case 0:
+			case 1:
+				f.Str(t.Out(0).String())
+			default:
+				f.Str("(")
+				for i := range t.NumOut() {
+					f.Str("ret").Int(i).SP().Str(t.Out(i).String()).Str(",")
+				}
+				f.Unchar().Str(")")
+			}
+			f.Str("{ ")
+			if t.NumOut() > 0 {
+				f.Str("return ")
+			}
+			f.Str(key).Str(m.Name).Str("(").Str(strings.Join(args, ",")).Str(")")
+			f.Str(" }")
+			f.NL()
+		}
 	}
 
 	for _, m := range f.methods {
@@ -137,6 +167,44 @@ func (f *file) buildHandleErr(logger string) *file {
 	f.Str("return").NL()
 	f.Str("}").NL()
 	return f
+}
+
+func (f *file) collectMethodImports(m reflect.Method) error {
+	self, _, err := pkginfo(nil)
+	if err != nil {
+		return err
+	}
+
+	t := m.Type
+	for i := range t.NumIn() {
+		pkgpath, pkgname, err := pkginfo(t.In(i))
+		if err != nil {
+			return err
+		} else if pkgpath == "" || pkgpath == self {
+			continue
+		}
+
+		imp := strconv.Quote(pkgpath)
+		if path.Base(pkgpath) != pkgname {
+			imp = fmt.Sprintf("%s %s", pkgname, imp) // 文件夹名与包名不同
+		}
+		f.imports[imp] = true
+	}
+	for i := range t.NumOut() {
+		pkgpath, pkgname, err := pkginfo(t.Out(i))
+		if err != nil {
+			return err
+		} else if pkgpath == "" || pkgpath == self {
+			continue
+		}
+
+		imp := strconv.Quote(pkgpath)
+		if path.Base(pkgpath) != pkgname {
+			imp = fmt.Sprintf("%s %s", pkgname, imp) // 文件夹名与包名不同
+		}
+		f.imports[imp] = true
+	}
+	return nil
 }
 
 func create(filename string, code []byte) error {
