@@ -48,11 +48,6 @@ func Gin(t reflect.Type) error {
 	}
 	for i := range n {
 		m := t.Method(i)
-		file, err := f.FindMethod(b.name, m.Name)
-		if err != nil {
-			return err
-		}
-		f := b.file(file)
 
 		name, kind, err := fnname(m.Name)
 		if err != nil {
@@ -60,6 +55,12 @@ func Gin(t reflect.Type) error {
 		} else if name == "" {
 			continue
 		}
+
+		file, err := f.FindMethod(b.name, m.Name)
+		if err != nil {
+			return err
+		}
+		f := b.file(file)
 
 		var e = method{httpmethod: kind, originName: m.Name, name: name}
 
